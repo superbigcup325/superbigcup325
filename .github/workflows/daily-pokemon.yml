@@ -1,0 +1,63 @@
+# 每天随机画一只宝可梦更新到 README。
+# 精灵数据来自 superbigcup325/Pokefetch（素材上游 pokemon-colorscripts，MIT）。
+# 闪光率自行掷骰 1/128，与 pokefetch 随机模式一致（显式 -n 时工具本身不出闪光）。
+
+name: daily pokemon
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # UTC 0 点 = 北京时间早上 8 点
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-pokemon
+
+jobs:
+  draw:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: superbigcup325/Pokefetch
+          path: pokefetch
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pokefetch
+
+      - name: Build pokefetch
+        run: cargo build --release --manifest-path pokefetch/Cargo.toml
+
+      - name: Draw today's pokemon
+        run: |
+          NAME=$(ls pokefetch/assets/colorscripts/large/regular | shuf -n 1)
+          SHINY=""
+          if [ $((RANDOM % 128)) -eq 0 ]; then SHINY="-s"; fi
+          echo "today: $NAME ${SHINY:-}"
+          pokefetch/target/release/pokefetch -n "$NAME" $SHINY -b --raw > poke.ans
+          python3 ansi2svg.py poke.ans pokemon.svg
+          {
+            echo "NAME=$NAME"
+            echo "SHINY=$([ -n "$SHINY" ] && echo yes || echo no)"
+          } >> "$GITHUB_ENV"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- pokemon.svg; then
+            echo "sprite unchanged, nothing to commit"
+            exit 0
+          fi
+          git add pokemon.svg
+          MSG="🎨 $NAME"
+          if [ "$SHINY" = yes ]; then MSG="$MSG ✨"; fi
+          git commit -m "$MSG"
+          git push
