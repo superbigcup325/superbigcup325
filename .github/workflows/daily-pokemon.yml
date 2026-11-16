@@ -6,7 +6,10 @@ name: daily pokemon
 
 on:
   schedule:
-    - cron: "0 0 * * *" # UTC 0 点 = 北京时间早上 8 点
+    # 目标：北京时间早上 8 点前后更新。
+    # GitHub 对 schedule 的队列延迟实测有 3–5 小时（2026-11 各次实际落在 03:3x–05:0x UTC），
+    # 所以 cron 取 UTC 21:00（= CST 05:00），落地约 08:00–10:00 CST。
+    - cron: "0 21 * * *"
   workflow_dispatch:
 
 permissions:
@@ -60,4 +63,14 @@ jobs:
           MSG="🎨 $NAME"
           if [ "$SHINY" = yes ]; then MSG="$MSG ✨"; fi
           git commit -m "$MSG"
-          git push
+          # push 偶发被 GitHub 侧 403（token 瞬时没有写权限，重跑即成功），
+          # 这里重试几次吃掉这种抖动，免得整次任务变红、当天的精灵跟着丢掉。
+          for i in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+            echo "push 第 $i 次失败，10 秒后重试" >&2
+            sleep 10
+          done
+          echo "push 连续 3 次失败，放弃" >&2
+          exit 1
